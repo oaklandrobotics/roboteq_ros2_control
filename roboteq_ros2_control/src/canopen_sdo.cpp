@@ -1,4 +1,4 @@
-#include "include/roboteq_ros2_control/canopen_sdo.hpp"
+#include "roboteq_ros2_control/canopen_sdo.hpp"
 
 // Helper function in a blank namespace so it stays internal
 namespace

@@ -20,6 +20,9 @@ namespace canopen
 
   template <typename T>
   T parse_sdo_read_response(const can_frame& frame, std::uint8_t nodeId);
+
+  template <typename T>
+  can_frame build_pdo_message(std::uint8_t nodeId, COBID cobId, T value);
 }
 
 #endif

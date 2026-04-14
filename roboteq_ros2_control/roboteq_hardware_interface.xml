@@ -1,0 +1,9 @@
+<library path="roboteq_ros2_control_plugin">
+  <class name="roboteq_ros2_control_plugin/RoboteqHardwareInterface"
+         type="roboteq_ros2_control::RoboteqHardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Roboteq plugin for ros2_control.
+    </description>
+  </class>
+</library>

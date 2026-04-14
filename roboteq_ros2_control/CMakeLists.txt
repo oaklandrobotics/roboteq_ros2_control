@@ -5,15 +5,11 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
 find_package(ament_cmake_auto REQUIRED)
+find_package(rclcpp REQUIRED)
+
 ament_auto_find_build_dependencies()
-
-ament_export_dependencies(rosidl_default_runtime)
-
-include_directories(include)
 
 ament_auto_add_library(
   roboteq_ros2_control_plugin SHARED
@@ -22,14 +18,18 @@ ament_auto_add_library(
   src/roboteq_hardware_interface.cpp
 )
 
+target_include_directories(roboteq_ros2_control_plugin PRIVATE
+  include
+)
+
 ament_target_dependencies(
   roboteq_ros2_control_plugin
   rclcpp
 )
 
-pluginlib_export_plugin_description_file(roboteq_interface roboteq_hardware_interface.xml)
-
 target_compile_features(roboteq_ros2_control_plugin PRIVATE cxx_std_20)
+
+pluginlib_export_plugin_description_file(hardware_interface roboteq_hardware_interface.xml)
 
 install(TARGETS roboteq_ros2_control_plugin
   ARCHIVE DESTINATION lib

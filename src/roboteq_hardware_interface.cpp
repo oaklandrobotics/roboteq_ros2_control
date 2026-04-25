@@ -35,8 +35,8 @@ namespace roboteq_ros2_control
     // double torque_setpoint_ = 0.0f; // [Nm] // TODO: Future implementation
 
     // State (Roboteq => ros2_control)
-    double vel_estimate_ = NAN; // [rad/s]
-    double pos_estimate_ = NAN; // [rad]
+    double vel_estimate_ = 0.0; // [rad/s]
+    double pos_estimate_ = 0.0; // [rad]
     // double torque_target_ = NAN; // [Nm] // TODO: Future implementation
     // double torque_estimate_ = NAN; // [Nm] // TODO: Future implementation
 
@@ -116,7 +116,7 @@ CallbackReturn RoboteqHardwareInterface::on_init(const hardware_interface::Hardw
 
   for (auto& joint : info_.joints)
   {
-    axes_.emplace_back(&can_intf_, std::stoi(joint.parameters.at("node_id")), gear_ratio_);
+    axes_.emplace_back(&can_intf_, std::stoi(joint.parameters.at("node_id")), std::stod(joint.parameters.at("gear_ratio")));
   }
 
   return CallbackReturn::SUCCESS;
@@ -222,6 +222,11 @@ std::vector<hardware_interface::StateInterface> RoboteqHardwareInterface::export
       hardware_interface::HW_IF_VELOCITY,
       &axes_[i].vel_estimate_
     ));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(
+      info_.joints[i].name,
+      hardware_interface::HW_IF_POSITION,
+      &axes_[i].pos_estimate_
+    ));
     // TODO: Implement additional interfaces
   }
 
@@ -278,9 +283,12 @@ return_type RoboteqHardwareInterface::write(const rclcpp::Time&, const rclcpp::D
 
 void RoboteqHardwareInterface::on_can_msg(const can_frame& frame)
 {
+  const std::uint16_t cob_id = static_cast<std::uint16_t>(frame.can_id & CAN_SFF_MASK);
+  const std::uint8_t node_id = static_cast<std::uint8_t>(cob_id & 0x7F);
+
   for (auto& axis : axes_)
   {
-    if ((frame.can_id >> 5) == axis.node_id_)
+    if (node_id == axis.node_id_)
     {
       axis.on_can_msg(timestamp_, frame);
     }

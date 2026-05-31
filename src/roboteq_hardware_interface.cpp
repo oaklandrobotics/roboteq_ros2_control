@@ -289,7 +289,7 @@ void RoboteqHardwareInterface::on_can_msg(const can_frame& frame)
 
   for (auto& axis : axes_)
   {
-    if (node_id == axis.node_id_)nm
+    if (node_id == axis.node_id_)
     {
       axis.on_can_msg(timestamp_, frame);
     }

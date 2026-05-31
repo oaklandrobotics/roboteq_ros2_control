@@ -272,6 +272,7 @@ return_type RoboteqHardwareInterface::write(const rclcpp::Time&, const rclcpp::D
   for (auto& axis : axes_)
   {
     std::int32_t inputVel = (axis.vel_setpoint_ * gear_ratio_) / (2 * M_PI);
+    inputVel *= 60;
     auto vel_can_frame = canopen::build_pdo_message(axis.node_id_, canopen::COBID::RPDO1, inputVel);
     axis.send_can_msg(vel_can_frame);
 
@@ -288,7 +289,7 @@ void RoboteqHardwareInterface::on_can_msg(const can_frame& frame)
 
   for (auto& axis : axes_)
   {
-    if (node_id == axis.node_id_)
+    if (node_id == axis.node_id_)nm
     {
       axis.on_can_msg(timestamp_, frame);
     }
@@ -315,15 +316,18 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame)
   {
     case static_cast<uint16_t>(canopen::COBID::TPDO1):
     {
+      int32_t invert = 1;
+
       double posEstimate = static_cast<double>(pos_raw);
       double velEstimate = static_cast<double>(vel_raw);
 
       // Our encoder is before the gearbox, we will be handling the gearbox ratio here.
-      posEstimate /= gear_ratio_;
+      posEstimate /= 7800;
       velEstimate /= gear_ratio_;
+
       
-      pos_estimate_ = posEstimate * (2 * M_PI);
-      vel_estimate_ = velEstimate * (2 * M_PI);
+      pos_estimate_ = (invert) * posEstimate * (2 * M_PI);
+      vel_estimate_ = (invert) * velEstimate * (2 * M_PI) / 60;
     } break;
     // TODO: Implement Torque Feedback
     // silently ignore unimplemented command IDs

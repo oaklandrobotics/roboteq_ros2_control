@@ -1,102 +1,4 @@
-// Internal headers
-#include "roboteq_ros2_control/socket_can.hpp"
-#include "roboteq_ros2_control/can_helpers.hpp"
-#include "roboteq_ros2_control/canopen_enums.hpp"
-#include "roboteq_ros2_control/canopen_sdo.hpp"
-#include "roboteq_ros2_control/roboteq_object_dictionary.hpp"
-
-// ROS2 headers
-#include "hardware_interface/system_interface.hpp"
-#include "hardware_interface/types/hardware_interface_type_values.hpp"
-#include "pluginlib/class_list_macros.hpp"
-#include "rclcpp/rclcpp.hpp"
-#include "std_srvs/srv/trigger.hpp"
-
-
-namespace roboteq_ros2_control
-{
-  struct Axis
-  {
-    Axis(SocketCanIntf* can_intf, uint32_t node_id, double gear_ratio) : can_intf_(can_intf), node_id_(node_id), gear_ratio_(gear_ratio) {}
-
-    void on_can_msg(const rclcpp::Time& timestamp, const can_frame& frame);
-    void send_can_msg(const can_frame& frame) const {
-      can_intf_->send_can_frame(frame);
-    }
-
-    SocketCanIntf* can_intf_;
-    uint8_t node_id_;
-    
-    double gear_ratio_;
-
-    // Commands (ros2_control => Roboteq)
-    double vel_setpoint_ = 0.0f; // [rad/s]
-    // double pos_setpoint_ = 0.0f; // [rad] // TODO: Future implementation
-    // double torque_setpoint_ = 0.0f; // [Nm] // TODO: Future implementation
-
-    // State (Roboteq => ros2_control)
-    double vel_estimate_ = 0.0; // [rad/s]
-    double pos_estimate_ = 0.0; // [rad]
-    // double torque_target_ = NAN; // [Nm] // TODO: Future implementation
-    // double torque_estimate_ = NAN; // [Nm] // TODO: Future implementation
-
-    bool motor_enabled_ = false;
-    bool faulted_ = false;
-    bool heartbeat_seen_ = false;
-
-    // Indicates which controller inputs are enabled. This is configured by the
-    // controller that sits on top of this hardware interface. Multiple inputs
-    // can be enabled at the same time, in this case the non-primary inputs are
-    // used as feedforward terms.
-    // bool pos_input_enabled_ = false; // TODO: Future implementation
-    // bool vel_input_enabled_ = false; // TODO: Future implementation
-    // bool torque_input_enabled_ = false; // TODO: Future implementation
-  };
-
-  class RoboteqHardwareInterface final : public hardware_interface::SystemInterface
-  {
-    public:
-      using return_type = hardware_interface::return_type;
-      using State = rclcpp_lifecycle::State;
-
-      // ROS2 control transitions
-      CallbackReturn on_init(const hardware_interface::HardwareComponentInterfaceParams & params) override;
-      CallbackReturn on_configure(const State& previous_state) override;
-      CallbackReturn on_cleanup(const State& previous_state) override;
-      CallbackReturn on_activate(const State& previous_state) override;
-      CallbackReturn on_deactivate(const State& previous_state) override;
-
-      std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
-      std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
-
-      return_type read(const rclcpp::Time&, const rclcpp::Duration&) override;
-      return_type write(const rclcpp::Time&, const rclcpp::Duration&) override;
-
-      void reinitialize();
-      void estop();
-
-    private:
-      void on_can_msg(const can_frame& frame);
-
-      EpollEventLoop event_loop_;
-      std::vector<Axis> axes_;
-      std::string can_intf_name_;
-      SocketCanIntf can_intf_;
-      rclcpp::Time timestamp_;
-
-      std::atomic<bool> estop_active_ = false;
-
-      // The ratio for our current setup is 7.3:1
-      double gear_ratio_ = 7.3;
-
-      // For reinitializing the control
-      std::shared_ptr<rclcpp::Node> service_node_;
-      std::thread spin_thread_;
-
-      rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reinit_srv_;
-      rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr estop_srv_;
-  };
-} // namespace roboteq_ros2_control
+#include "../include/roboteq_ros2_control/roboteq_hardware_interface.hpp"
 
 using namespace roboteq_ros2_control;
 
@@ -124,8 +26,21 @@ CallbackReturn RoboteqHardwareInterface::on_init(const hardware_interface::Hardw
 
 CallbackReturn RoboteqHardwareInterface::on_configure(const State&)
 {
+  if (!can_intf_.init(can_intf_name_, &event_loop_, std::bind(&RoboteqHardwareInterface::on_can_msg, this, _1)))
+  {
+    RCLCPP_WARN(
+      rclcpp::get_logger("RoboteqHardwareInterface"),
+      "Failed to initialize SocketCAN on %s",
+      can_intf_name_.c_str()
+    );
+    return CallbackReturn::FAILURE;
+  }
+  
+  RCLCPP_INFO(rclcpp::get_logger("RoboteqHardwareInterface"), "Initialized SocketCAN on %s", can_intf_name_.c_str());
+
   // For various service controls
   service_node_ = rclcpp::Node::make_shared("roboteq_service_listener");
+  service_executor_.add_node(service_node_);
 
   reinit_srv_ = service_node_->create_service<std_srvs::srv::Trigger>(
     "/roboteq/reinit",
@@ -147,22 +62,18 @@ CallbackReturn RoboteqHardwareInterface::on_configure(const State&)
     }
   );
 
-  // Spin up the node
-  spin_thread_ = std::thread([this]() { rclcpp::spin(service_node_); });
-  // spin_thread_.detach();
+  // Spin up executor
+  spin_thread_ = std::thread(
+    [this]()
+    {
+      service_executor_.spin();
+    }
+  );
 
-  RCLCPP_INFO(rclcpp::get_logger("RoboteqHardwareInterface"), "Spinning service node in background thread.");
-
-  if (!can_intf_.init(can_intf_name_, &event_loop_, std::bind(&RoboteqHardwareInterface::on_can_msg, this, _1)))
-  {
-    RCLCPP_ERROR(
-      rclcpp::get_logger("RoboteqHardwareInterface"),
-      "Failed to initialize SocketCAN on %s",
-      can_intf_name_.c_str()
-    );
-    return CallbackReturn::ERROR;
-  }
-  RCLCPP_INFO(rclcpp::get_logger("RoboteqHardwareInterface"), "Initialized SocketCAN on %s", can_intf_name_.c_str());
+  RCLCPP_INFO(
+    rclcpp::get_logger("RoboteqHardwareInterface"),
+    "Service executor started."
+  );
 
   return CallbackReturn::SUCCESS;
 }
@@ -170,10 +81,7 @@ CallbackReturn RoboteqHardwareInterface::on_configure(const State&)
 CallbackReturn RoboteqHardwareInterface::on_cleanup(const State&)
 {
   // Cleanup the reinitialization node
-  if (service_node_)
-  {
-      service_node_->get_node_base_interface()->get_context()->shutdown("Shutting down Roboteq service listener.");
-  }
+  service_executor_.cancel();
 
   if (spin_thread_.joinable())
   {
@@ -207,6 +115,54 @@ CallbackReturn RoboteqHardwareInterface::on_deactivate(const State&)
   NMTActiveFrame.can_dlc = 1;
   NMTActiveFrame.data[0] = static_cast<uint8_t>(canopen::NMT::goToPreOperational);
   axes_[0].send_can_msg(NMTActiveFrame);
+
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn RoboteqHardwareInterface::on_error(const State&)
+{
+  RCLCPP_INFO(
+    rclcpp::get_logger("RoboteqHardwareInterface"),
+    "Error occurred during operation"
+  );
+
+  // Try to set NMT to pre-operational
+  try
+  {
+    can_frame NMTActiveFrame {};
+    NMTActiveFrame.can_id = static_cast<canid_t>(canopen::COBID::NMT);
+    NMTActiveFrame.can_dlc = 1;
+    NMTActiveFrame.data[0] = static_cast<uint8_t>(canopen::NMT::goToPreOperational);
+    axes_[0].send_can_msg(NMTActiveFrame);
+  }
+  catch(const std::exception& e)
+  {
+    RCLCPP_INFO(
+      rclcpp::get_logger("RoboteqHardwareInterface"),
+      "CAN interface unable to set NMT to Pre-Operational."
+    );
+  }
+
+  // Clean up service
+  service_executor_.cancel();
+
+  if (spin_thread_.joinable())
+  {
+    spin_thread_.join();
+  }
+
+  if (service_node_)
+  {
+    service_executor_.remove_node(service_node_);
+  }
+
+  // Release service pointers
+  reinit_srv_.reset();
+  estop_srv_.reset();
+  service_node_.reset();
+
+  // Release CAN interface
+  can_intf_.deinit();
 
   return CallbackReturn::SUCCESS;
 }

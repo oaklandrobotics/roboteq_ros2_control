@@ -22,8 +22,8 @@ namespace roboteq_ros2_control
     Axis(SocketCanIntf* can_intf, uint32_t node_id, double gear_ratio) : can_intf_(can_intf), node_id_(node_id), gear_ratio_(gear_ratio) {}
 
     void on_can_msg(const rclcpp::Time& timestamp, const can_frame& frame);
-    void send_can_msg(const can_frame& frame) const {
-      can_intf_->send_can_frame(frame);
+    bool send_can_msg(const can_frame& frame) const {
+      return can_intf_->send_can_frame(frame);
     }
 
     SocketCanIntf* can_intf_;

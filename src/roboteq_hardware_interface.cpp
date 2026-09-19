@@ -230,7 +230,10 @@ return_type RoboteqHardwareInterface::write(const rclcpp::Time&, const rclcpp::D
     std::int32_t inputVel = (axis.vel_setpoint_ * gear_ratio_) / (2 * M_PI);
     inputVel *= 60;
     auto vel_can_frame = canopen::build_pdo_message(axis.node_id_, canopen::COBID::RPDO1, inputVel);
-    axis.send_can_msg(vel_can_frame);
+    if !(axis.send_can_msg(vel_can_frame))
+    {
+      return hardware_interface::return_type::ERROR;
+    }
 
     // TODO: Implement additional interfaces
   }

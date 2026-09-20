@@ -232,7 +232,7 @@ return_type RoboteqHardwareInterface::write(const rclcpp::Time&, const rclcpp::D
     auto vel_can_frame = canopen::build_pdo_message(axis.node_id_, canopen::COBID::RPDO1, inputVel);
     if !(axis.send_can_msg(vel_can_frame))
     {
-      return hardware_interface::return_type::ERROR;
+      return return_type::ERROR;
     }
 
     // TODO: Implement additional interfaces
